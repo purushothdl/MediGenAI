@@ -1,3 +1,4 @@
-confidential.py
+
 serviceAccountKey.json
-/.env
+# add env file
+.env
