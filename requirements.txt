@@ -12,3 +12,4 @@ typing
 firebase_admin
 uuid
 pillow
+python-dotenv

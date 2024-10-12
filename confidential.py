@@ -1,5 +1,12 @@
-bucket_id = "medigenai-94061.appspot.com"
-mongo_uri = "mongodb+srv://jeankirstein6104:UaSXsPMMz99Acj9v@projects.g4su2.mongodb.net/?retryWrites=true&w=majority&appName=projects"
-openai_key = "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"
+from dotenv import load_dotenv
+import os
 
-# comment simple
+# Load environment variables from the .env file
+load_dotenv()
+
+# Access the environment variables
+bucket_id = os.getenv("BUCKET_ID")
+mongo_uri = os.getenv("MONGO_URI")
+openai_key = os.getenv("OPENAI_KEY")
+
+
