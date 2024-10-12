@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from patients import router as patients_router
+from users.patients import router as patients_router
 
 app = FastAPI()
 

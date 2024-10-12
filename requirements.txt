@@ -5,3 +5,10 @@ motor
 python-jose
 datetime
 passlib
+openai
+numpy
+pdfplumber
+typing
+firebase_admin
+uuid
+pillow
