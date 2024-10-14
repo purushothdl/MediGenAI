@@ -12,4 +12,3 @@ pdfplumber
 firebase_admin
 pillow
 python-dotenv
-bson
