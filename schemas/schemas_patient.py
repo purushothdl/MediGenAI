@@ -37,7 +37,24 @@ class PatientLogin(BaseModel):
 class PatientResponse(BaseModel):
     id: str
     username: str
+    name: str
     age: int
+    gender: str
+    email: str
+    address: str
+    contact_number: str
+    date_of_birth: str
+    height: float
+    weight: float
+    blood_group: str
+    emergency_contact_number: str
+    relationship_to_emergency_contact: str
+    allergies: List[str]
+    medical_history: List[str]
+    current_medications: List[str]
+    past_surgeries_or_procedures: List[str]
+    known_family_medical_history: List[str]
+    smoking_alcohol_consumption_history: str
 
 
 # Schema for JWT Token Response

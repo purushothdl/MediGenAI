@@ -13,3 +13,5 @@ database = client.medical_data
 
 # Define the collection for patients
 patients_collection = database.patients
+
+doctors_collection = database.doctors

@@ -3,13 +3,13 @@ fastapi
 pydantic
 motor
 python-jose
-datetime
 passlib
-openai
+groq
+easyocr
+PyMuPDF
 numpy
 pdfplumber
-typing
 firebase_admin
-uuid
 pillow
 python-dotenv
+bson
