@@ -14,3 +14,5 @@ pillow
 python-dotenv
 python-multipart
 transformers
+tf-keras
+python-bidi==0.6.2
