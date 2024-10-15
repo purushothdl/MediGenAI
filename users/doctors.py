@@ -39,6 +39,8 @@ async def get_doctor_collection() -> AsyncIOMotorCollection:
 # Helper function to convert MongoDB document to dictionary
 def doctor_helper(doctor) -> dict:
     return {
+        "username": str(doctor["username"]),
+        "name": str(doctor.get("name", "")),
         "age": int(doctor.get("age", 0)) if doctor.get("age") is not None else 0,
         "id": str(doctor["_id"]),
         "username": doctor["username"],
@@ -55,9 +57,10 @@ def doctor_helper(doctor) -> dict:
     }
 
 # Register route for creating new doctor records
-@router.post("/doctor/register", response_model=schemas_doctor.DoctorResponse, tags=['Doctors'])
+@router.post("/doctors/register", tags=['Doctors'])
 async def register_doctor(doctor: schemas_doctor.DoctorRegister, 
                           doctors_collection: AsyncIOMotorCollection = Depends(get_doctor_collection)):
+    
     # Check if username already exists
     existing_doctor = await doctors_collection.find_one({"username": doctor.username})
     if existing_doctor:
@@ -70,24 +73,15 @@ async def register_doctor(doctor: schemas_doctor.DoctorRegister,
     new_doctor = {
         "username": doctor.username,
         "hashed_password": hashed_password,
-        "name": doctor.name,
-        "specialization": doctor.specialization,
-        "medical_license_number": doctor.medical_license_number,
-        "years_of_experience": doctor.years_of_experience,
-        "clinic_address": doctor.clinic_address,
-        "contact_number": doctor.contact_number,
-        "emergency_contact_number": doctor.emergency_contact_number,
-        "relationship_to_emergency_contact": doctor.relationship_to_emergency_contact,
-        "age": doctor.age,
-        "gender": doctor.gender,
-        "email": doctor.email
+        "name": doctor.name
     }
 
     # Insert the new doctor into the database
-    result = await doctors_collection.insert_one(dict(new_doctor))
+    result = await doctors_collection.insert_one(new_doctor)
 
     # Return a success message
     return {"message": "Registration successful"}
+
 
 
 
@@ -106,6 +100,36 @@ async def login(doctor: schemas_doctor.DoctorLogin, doctors_collection: AsyncIOM
     return {"access_token": access_token, "token_type": "bearer"}
 
 
+# Update route for adding/updating doctor details
+@router.post("/doctors/update_details", tags=['Doctors'])
+async def update_doctor_details(doctor_id: str,
+                                doctor: schemas_doctor.DoctorUpdate, 
+                                token: str = Depends(oauth2_scheme),
+                                doctors_collection: AsyncIOMotorCollection = Depends(get_doctor_collection)):
+    # Decode the JWT token to get the username
+    username = utils.decode_access_token(token)
+    if username is None:
+        raise HTTPException(status_code=401, detail="Could not validate credentials")
+
+    # Check if doctor exists by doctor_id
+    if not ObjectId.is_valid(doctor_id):
+        raise HTTPException(status_code=400, detail="Invalid doctor ID")
+
+    existing_doctor = await doctors_collection.find_one({"_id": ObjectId(doctor_id)})
+    if not existing_doctor:
+        raise HTTPException(status_code=404, detail="Doctor not found")
+
+    # Update doctor details
+    update_data = {key: value for key, value in doctor.dict().items() if value is not None}
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No valid fields to update")
+
+    await doctors_collection.update_one({"_id": ObjectId(doctor_id)}, {"$set": update_data})
+
+    # Return a success message
+    return {"message": "Doctor details updated successfully"}
+
+
 
 # Protected endpoint that requires JWT token
 @router.get("/doctors/me", response_model=schemas_doctor.DoctorResponse, tags=['Doctors'])
@@ -122,6 +146,7 @@ async def read_doctor_me(token: str = Depends(oauth2_scheme), doctors_collection
 
     # Return the doctor information (excluding sensitive data)
     return doctor_helper(db_doctor)
+
 
 
 # Dependency to get the patients MongoDB collection
@@ -189,58 +214,72 @@ async def view_patient_tickets(patient_id: str, token: str = Depends(oauth2_sche
     # Extract tickets from the patient record
     tickets = patient.get("tickets", [])
 
-    # Convert each ticket to dictionary
-    tickets_list = [
-        {
+    # Initialize Firebase bucket
+    bucket = storage.bucket()
+
+    # Convert each ticket to dictionary and check for analysis file
+    tickets_list = []
+    for ticket in tickets:
+        ticket_data = {
             "ticket_id": ticket.get("ticket_id"),
+            "username": ticket.get("username"),
             "issue": ticket.get("issue"),
+            "created_at": ticket.get("created_at"),
+            "img_urls": ticket.get("img_urls"),
+            "doc_urls": ticket.get("doc_urls"),
             "status": ticket.get("status")
         }
-        for ticket in tickets
-    ]
+
+        # Check if analysis file exists in Firebase
+        analysis_blob = bucket.blob(f"preliminary_analysis/{ticket.get('username')}/{ticket.get('issue')+'_'+ticket.get('ticket_id')}/report.json")
+        if analysis_blob.exists():
+            analysis_content = analysis_blob.download_as_text()
+            ticket_data["analysis"] = json.loads(analysis_content)
+
+        tickets_list.append(ticket_data)
 
     return {"tickets": tickets_list}
 
 
 
-# Route for doctors to view the past patient analysis files (past files stored in firebase)
-@router.get("/doctors/view_patient_files/{patient_id}", tags=['Doctors'])
-async def view_patient_reports_by_id(
-    patient_id: str, 
-    token: str = Depends(oauth2_scheme),
-    patients_collection: AsyncIOMotorCollection = Depends(get_patient_collection)):
+# # Route for doctors to view the past patient analysis files (past files stored in firebase)
+# @router.get("/doctors/view_patient_files/{patient_id}", tags=['Doctors'])
+# async def view_patient_reports_by_id(
+#     patient_id: str, 
+#     token: str = Depends(oauth2_scheme),
+#     patients_collection: AsyncIOMotorCollection = Depends(get_patient_collection)):
 
-    username = utils.decode_access_token(token)
-    if username is None:
-        raise HTTPException(status_code=401, detail="Could not validate credentials")
+#     username = utils.decode_access_token(token)
+#     if username is None:
+#         raise HTTPException(status_code=401, detail="Could not validate credentials")
 
 
-    try:
-        # Retrieve the specific patient from the database
-        patient = await patients_collection.find_one({"_id": ObjectId(patient_id)})
-        if not patient:
-            raise HTTPException(status_code=404, detail="Patient not found")
+#     try:
+#         # Retrieve the specific patient from the database
+#         patient = await patients_collection.find_one({"_id": ObjectId(patient_id)})
+#         if not patient:
+#             raise HTTPException(status_code=404, detail="Patient not found")
 
-        # Construct the path for retrieving all past reports from Firebase
-        bucket = storage.bucket()
-        report_folder_prefix = f"preliminary_analysis/{patient['username']}/"
+#         # Construct the path for retrieving all past reports from Firebase
+#         bucket = storage.bucket()
+#         report_folder_prefix = f"preliminary_analysis/{patient['username']}/"
 
-        # List all blobs under the patient's username folder
-        blobs = bucket.list_blobs(prefix=report_folder_prefix)
-        report_files = []
-        for blob in blobs:
-            # Extracting the issue and ticket_id from the folder name
-            folder_name = blob.name.split('/')[-2]
-            if folder_name not in report_files:
-                report_files.append(folder_name)
+#         # List all blobs under the patient's username folder
+#         blobs = bucket.list_blobs(prefix=report_folder_prefix)
+#         report_files = []
+#         for blob in blobs:
+#             # Extracting the issue and ticket_id from the folder name
+#             folder_name = blob.name.split('/')[-2]
+#             if folder_name not in report_files:
+#                 report_files.append(folder_name)
 
-        # Return the list of all patient reports
-        return {
-            "patient_id": patient_id,
-            "reports": report_files
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+#         # Return the list of all patient reports
+#         return {
+#             "patient_id": patient_id,
+#             "reports": report_files
+#         }
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
 
 
 
@@ -293,45 +332,45 @@ async def send_final_report(
 
 
 
-# Route where the doctors can view in detail about the patients past analysis report 
-@router.get("/doctors/view_past_analysis/{patient_id}/{issue_ticketid}", tags=['Doctors'])
-async def view_patient_report_json(
-    patient_id: str,
-    issue_ticketid: str,
-    token: str = Depends(oauth2_scheme),
-    patients_collection: AsyncIOMotorCollection = Depends(get_patient_collection)):
+# # Route where the doctors can view in detail about the patients past analysis report 
+# @router.get("/doctors/view_past_analysis/{patient_id}/{issue_ticketid}", tags=['Doctors'])
+# async def view_patient_report_json(
+#     patient_id: str,
+#     issue_ticketid: str,
+#     token: str = Depends(oauth2_scheme),
+#     patients_collection: AsyncIOMotorCollection = Depends(get_patient_collection)):
 
-    username = utils.decode_access_token(token)
-    if username is None:
-        raise HTTPException(status_code=401, detail="Could not validate credentials")
+#     username = utils.decode_access_token(token)
+#     if username is None:
+#         raise HTTPException(status_code=401, detail="Could not validate credentials")
 
-    try:
-        # Retrieve the specific patient from the database
-        patient = await patients_collection.find_one({"_id": ObjectId(patient_id)})
-        if not patient:
-            raise HTTPException(status_code=404, detail="Patient not found")
+#     try:
+#         # Retrieve the specific patient from the database
+#         patient = await patients_collection.find_one({"_id": ObjectId(patient_id)})
+#         if not patient:
+#             raise HTTPException(status_code=404, detail="Patient not found")
 
-        # Construct the path for the specific report in Firebase
-        bucket = storage.bucket()
-        report_path = f"preliminary_analysis/{patient['username']}/{issue_ticketid}/report.json"
+#         # Construct the path for the specific report in Firebase
+#         bucket = storage.bucket()
+#         report_path = f"preliminary_analysis/{patient['username']}/{issue_ticketid}/report.json"
 
-        # Check if the report exists
-        blob = bucket.blob(report_path)
-        if not blob.exists():
-            raise HTTPException(status_code=404, detail="Report not found")
+#         # Check if the report exists
+#         blob = bucket.blob(report_path)
+#         if not blob.exists():
+#             raise HTTPException(status_code=404, detail="Report not found")
 
-        # Download the JSON content
-        report_content = blob.download_as_string()
-        report_json = json.loads(report_content)
+#         # Download the JSON content
+#         report_content = blob.download_as_string()
+#         report_json = json.loads(report_content)
 
-        # Return the JSON content directly
-        return {
-            "patient_id": patient_id,
-            "issue_ticketid": issue_ticketid,
-            "report": report_json
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+#         # Return the JSON content directly
+#         return {
+#             "patient_id": patient_id,
+#             "issue_ticketid": issue_ticketid,
+#             "report": report_json
+#         }
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=str(e))
 
 
 
