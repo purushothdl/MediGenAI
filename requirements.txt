@@ -13,3 +13,7 @@ firebase_admin
 pillow
 python-dotenv
 python-multipart
+transformers
+tf-keras
+python-bidi==0.6.2
+scikit-learn==1.5.2
