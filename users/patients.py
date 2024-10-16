@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Form, UploadFile, File, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Form, UploadFile, File, Request, Body
 from motor.motor_asyncio import AsyncIOMotorCollection
 from fastapi.security import OAuth2PasswordBearer
 from schemas import schemas_patient
@@ -12,10 +12,16 @@ from typing import List,  Optional
 from bson import ObjectId
 from datetime import datetime
 import mimetypes
-from transformers import pipeline
-import tf_keras
+# from langchain.agents import create_json_agent
+# from langchain.agents.agent_toolkits import JsonToolkit
+# from langchain.tools.json.tool import JsonSpec
+# from langchain.memory import ConversationBufferMemory
 from sklearn.feature_extraction.text import TfidfVectorizer
 import httpx
+# from langchain_groq import ChatGroq
+import os
+
+
 
 router = APIRouter()
 
@@ -361,48 +367,70 @@ async def submit_feedback(
 
 
 
+# # Define the /patients/chatbot route
+# @router.post("/patients/chatbot", tags=["Patients"])
+# async def chatbot(
+#     patient_id: str = Form(...),
+#     ticket_id: str = Form(...),
+#     user_input: str = Form(...),
+#     patients_collection: AsyncIOMotorCollection = Depends(get_patient_collection)):
 
-        
-# # Route to create a general chatbot for patients using Google Gemini API
-# @router.post("/patients/chatbox", tags=["Patients"])
-# async def patients_chatbox(
-#     request: Request,
-#     token: str = Depends(oauth2_scheme),
-#     patients_collection: AsyncIOMotorCollection = Depends(get_patient_collection)
-# ):
 #     try:
-#         # Get the patient message from request body
-#         body = await request.json()
-#         message = body.get("message")
-#         if not message:
-#             raise HTTPException(status_code=400, detail="Message is required")
+#         # Retrieve the specific patient from the database
+#         patient = await patients_collection.find_one({"_id": ObjectId(patient_id)})
+#         if not patient:
+#             raise HTTPException(status_code=404, detail="Patient not found")
 
-#         # Use Google Gemini API to generate a response based on the user question
-#         async with httpx.AsyncClient() as client:
-#             gemini_api_key = "AIzaSyAurS4kzapMMz3_vIaM-aoNaccxx7x9_hg"
-#             response = await client.post(
-#                 "https://gemini.googleapis.com/v1beta/chat:complete",
-#                 headers={
-#                     "Authorization": f"Bearer {gemini_api_key}",
-#                     "Content-Type": "application/json"
-#                 },
-#                 json={
-#                     "prompt": message,
-#                     "model": "chat-bison",  # Example model name, adjust as needed
-#                     "temperature": 0.7,
-#                     "maxTokens": 150
-#                 }
-#             )
-#             if response.status_code == 200:
-#                 response_data = response.json()
-#                 candidates = response_data.get("candidates", [])
-#                 if candidates:
-#                     gemini_response = candidates[0].get("content", "I'm here to help you. Could you please provide more details?")
-#                 else:
-#                     gemini_response = "I'm here to help you. Could you please provide more details?"
-#             else:
-#                 raise HTTPException(status_code=response.status_code, detail=f"Error from Gemini API: {response.text}")
-#         # Return the response to the patient
-#         return {"response": gemini_response}
+    
+#         issue = next((ticket.get("issue") for ticket in patient.get("tickets", []) if ticket.get("ticket_id") == ticket_id), "").strip()
+#         # Construct the path for the analysis report in Firebase
+#         bucket = storage.bucket()
+#         report_path = f"preliminary_analysis/{patient['username']}/{issue}_{ticket_id}/report.json"
+#         blob = bucket.blob(report_path)
+
+#         # Check if the report exists
+#         if not blob.exists():
+#             print(f"Report not found at path: {report_path}")
+#             raise HTTPException(status_code=404, detail=f"Report not found at path: {report_path}")
+
+#         # Download the report content
+#         report_content = blob.download_as_string()
+#         report_data = json.loads(report_content)
+#         if isinstance(report_data, dict) and 'analysis' in report_data:
+#             report_data = report_data['analysis']
+
+#         # Define the JSON spec
+#         spec = JsonSpec(dict_={'analysis': report_data} if isinstance(report_data, list) else report_data, max_value_length=2000)
+
+#         # Create a toolkit for JSON
+#         toolkit = JsonToolkit(spec=spec)
+
+#         # Create memory for conversation
+#         memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+
+#          # Initialize the LLM with Groq
+#         llm = ChatGroq(
+#             model="llama3-8b-8192",
+#             temperature=0,
+#             max_tokens=128,
+#             timeout=5,
+#             max_retries=1,
+#         )
+
+#         # Create an agent using the JSON toolkit, Groq LLM, and conversation memory
+#         agent = create_json_agent(llm=llm, toolkit=toolkit, memory=memory, max_iterations=500, verbose=False)
+
+#         # Run the agent and return a response to the user
+        
+#         combined_analysis = ''.join(item['analysis'] for item in report_data if 'analysis' in item)
+#         spec = JsonSpec(dict_={'combined_analysis': combined_analysis}, max_value_length=2000)
+#         toolkit = JsonToolkit(spec=spec)
+#         agent = create_json_agent(llm=llm, toolkit=toolkit, memory=memory, max_iterations=200, verbose=False, handle_parsing_errors=True)
+#         response = agent.invoke(user_input, memory=memory)
+
+#         return {
+#             "ticket_id": ticket_id,
+#             "chatbot_response": response
+#         }
 #     except Exception as e:
 #         raise HTTPException(status_code=500, detail=str(e))

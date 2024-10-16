@@ -103,7 +103,7 @@ async def process_file_from_firebase(file_path: str):
         analysis_result = analyze_text_with_groq(extracted_text)
         
         return {
-            "extracted_text": extracted_text,
+            # "extracted_text": extracted_text,
             "analysis": analysis_result
         }
     except Exception as e:
@@ -146,9 +146,8 @@ async def analyze(
         for file in files:
             content = file.download_as_bytes()
             report = {
-                "file_name": file.name,
-                "type": "image" if file.content_type.startswith("image/") else "text",
-                "extracted_text": "",
+                "file_name": f"gs://{bucket.name}/{file.name}",
+                "type": "image" if file.content_type.startswith("image/") else "pdf",
                 "analysis": ""
             }
 
@@ -156,13 +155,11 @@ async def analyze(
                 # Extract text from the image
                 image = Image.open(io.BytesIO(content))
                 extracted_text = extract_text_from_image(image)
-                report["extracted_text"] = extracted_text
-
+        
                 # Use Groq to analyze the extracted text
                 analysis_result = analyze_text_with_groq(extracted_text)
                 report["analysis"] = analysis_result
-                # vision_data.append(analysis_result)
-
+               
             elif file.content_type == "application/pdf":
                 # Extract text from the PDF
                 extracted_text = extract_text_from_pdf(content)
@@ -180,7 +177,7 @@ async def analyze(
                 messages=[{"role": "user", 
                            "content": f"""
                                 Based on the following text, provide a list of medical specialists needed, 
-                                along with reasons for why each specialist is required:{extracted_text}"""}])
+                                along with reasons for why each specialist is required, keep it short:{extracted_text}"""}])
             
             individual_recommendations_text = individual_response.choices[0].message.content.splitlines()
 
@@ -197,12 +194,10 @@ async def analyze(
             individual_reports.append(report)
 
 
-        # Compile a final report
-        final_report = {
-            "individual_reports": individual_reports,
-            "overall_evaluation": f"""The analysis indicates potential health concerns that should be addressed by the listed specialists. 
-            Each specialist is recommended based on their expertise in managing the identified issues."""
-        }
+        # # Compile a final report
+        # final_report = {
+        #     "individual_reports": individual_reports,
+        # }
 
         # Update the ticket status to "Analysis Completed" in the patient database
         await patients_collection.update_one(
@@ -214,12 +209,12 @@ async def analyze(
         prelim_report_folder = f"preliminary_analysis/{patient['username']}/{issue+'_'+str(ticket_id)}"
         prelim_report_path = f"{prelim_report_folder}/report.json"
         blob = bucket.blob(prelim_report_path)
-        blob.upload_from_string(json.dumps(final_report), content_type="application/json")
+        blob.upload_from_string(json.dumps(individual_reports), content_type="application/json")
 
         # Return the final compiled analysis
         return {
             "ticket_id": ticket_id,
-            "analysis": final_report
+            "reports": individual_reports
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

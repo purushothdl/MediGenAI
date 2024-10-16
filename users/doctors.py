@@ -315,7 +315,7 @@ async def send_final_report(
         final_report_folder = f"final_reports/{patient['username']}/{issue+'_'+str(ticket_id)}"
         final_report_path = f"{final_report_folder}/final_report.doc"
         blob = bucket.blob(final_report_path)
-        blob.upload_from_string(report_content, content_type="application/msword")
+        blob.upload_from_string(report_content, content_type="application/json")
 
         # Update the ticket status to "Final Report Submitted" in the patient database
         await patients_collection.update_one(
