@@ -12,19 +12,40 @@ from typing import List,  Optional
 from bson import ObjectId
 from datetime import datetime
 import mimetypes
-# from langchain.agents import create_json_agent
-# from langchain.agents.agent_toolkits import JsonToolkit
-# from langchain.tools.json.tool import JsonSpec
-# from langchain.memory import ConversationBufferMemory
+from langchain.agents import create_json_chat_agent, AgentExecutor
+from langchain.agents.agent_toolkits import JsonToolkit
+from langchain.tools.json.tool import JsonSpec
+from langchain.memory import ConversationBufferMemory
 from sklearn.feature_extraction.text import TfidfVectorizer
 import httpx
-# from langchain_groq import ChatGroq
+from langchain_groq import ChatGroq
 import os
+import asyncio
+import json
+import loguru
+import traceback
+from langchain_community.tools.tavily_search import TavilySearchResults
+from langchain_core.prompts import ChatPromptTemplate
 
-
+from langchain import hub
 
 router = APIRouter()
 
+# Initialize Groq LLM with optimized parameters
+llm = ChatGroq(
+    model="llama3-groq-70b-8192-tool-use-preview",
+    api_key="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",
+    temperature=0,
+    max_tokens=8000,   # Reduce max tokens
+    timeout=1000,        # Lower the timeout
+    max_retries=2,    # Limit retries for faster failure response
+)
+# Get the prompt to use - you can modify this!
+prompt = hub.pull("hwchase17/react-chat-json")
+# putting api key in os.environ
+os.environ["TAVILY_API_KEY"] = "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"
+
+tools = [TavilySearchResults(max_results=1, api_key="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")]
 
 # Define the OAuth2PasswordBearer instance to retrieve the JWT token
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
@@ -365,72 +386,54 @@ async def submit_feedback(
     
 
 
+# Define the /patients/chatbot route
+@router.post("/patients/chatbot", tags=["Patients"])
+async def chatbot(
+    patient_id: str = Form(...),
+    ticket_id: str = Form(...),
+    user_input: str = Form(...),
+    patients_collection: AsyncIOMotorCollection = Depends(get_patient_collection)):
+
+    try:
+        # Retrieve patient from the database asynchronously
+        patient = await patients_collection.find_one({"_id": ObjectId(patient_id)})
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+
+        # Find the corresponding ticket and issue
+        issue = next((ticket.get("issue") for ticket in patient.get("tickets", []) if ticket.get("ticket_id") == ticket_id), "").strip()
+
+        # Construct the path for the analysis report in Firebase
+        bucket = storage.bucket()
+        report_path = f"preliminary_analysis/{patient['username']}/{issue}_{ticket_id}/report.json"
+        blob = bucket.blob(report_path)
+
+        # Check if the report exists
+        if not blob.exists():
+            raise HTTPException(status_code=404, detail=f"Report not found at path: {report_path}")
+
+        # Download report asynchronously
+        report_content = await asyncio.to_thread(blob.download_as_string)
+        report_data = json.loads(report_content)
+
+        # Extract the analysis part of the report
+        if isinstance(report_data, dict) and 'analysis' in report_data:
+            report_data = report_data['analysis']
+
+        # Combine the analysis text for QA
+        combined_analysis = ' '.join(item['analysis'] for item in report_data if 'analysis' in item)
+
+        # Use Groq LLM to answer the question based on the combined text
+        llm_input = f"User question: {user_input}. Related medical information: {combined_analysis}"
 
 
-# # Define the /patients/chatbot route
-# @router.post("/patients/chatbot", tags=["Patients"])
-# async def chatbot(
-#     patient_id: str = Form(...),
-#     ticket_id: str = Form(...),
-#     user_input: str = Form(...),
-#     patients_collection: AsyncIOMotorCollection = Depends(get_patient_collection)):
+        # Get the response from the LLM
+        response = llm.predict(llm_input)
 
-#     try:
-#         # Retrieve the specific patient from the database
-#         patient = await patients_collection.find_one({"_id": ObjectId(patient_id)})
-#         if not patient:
-#             raise HTTPException(status_code=404, detail="Patient not found")
+        return {
+            "ticket_id": ticket_id,
+            "chatbot_response": response
+        }
 
-    
-#         issue = next((ticket.get("issue") for ticket in patient.get("tickets", []) if ticket.get("ticket_id") == ticket_id), "").strip()
-#         # Construct the path for the analysis report in Firebase
-#         bucket = storage.bucket()
-#         report_path = f"preliminary_analysis/{patient['username']}/{issue}_{ticket_id}/report.json"
-#         blob = bucket.blob(report_path)
-
-#         # Check if the report exists
-#         if not blob.exists():
-#             print(f"Report not found at path: {report_path}")
-#             raise HTTPException(status_code=404, detail=f"Report not found at path: {report_path}")
-
-#         # Download the report content
-#         report_content = blob.download_as_string()
-#         report_data = json.loads(report_content)
-#         if isinstance(report_data, dict) and 'analysis' in report_data:
-#             report_data = report_data['analysis']
-
-#         # Define the JSON spec
-#         spec = JsonSpec(dict_={'analysis': report_data} if isinstance(report_data, list) else report_data, max_value_length=2000)
-
-#         # Create a toolkit for JSON
-#         toolkit = JsonToolkit(spec=spec)
-
-#         # Create memory for conversation
-#         memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
-
-#          # Initialize the LLM with Groq
-#         llm = ChatGroq(
-#             model="llama3-8b-8192",
-#             temperature=0,
-#             max_tokens=128,
-#             timeout=5,
-#             max_retries=1,
-#         )
-
-#         # Create an agent using the JSON toolkit, Groq LLM, and conversation memory
-#         agent = create_json_agent(llm=llm, toolkit=toolkit, memory=memory, max_iterations=500, verbose=False)
-
-#         # Run the agent and return a response to the user
-        
-#         combined_analysis = ''.join(item['analysis'] for item in report_data if 'analysis' in item)
-#         spec = JsonSpec(dict_={'combined_analysis': combined_analysis}, max_value_length=2000)
-#         toolkit = JsonToolkit(spec=spec)
-#         agent = create_json_agent(llm=llm, toolkit=toolkit, memory=memory, max_iterations=200, verbose=False, handle_parsing_errors=True)
-#         response = agent.invoke(user_input, memory=memory)
-
-#         return {
-#             "ticket_id": ticket_id,
-#             "chatbot_response": response
-#         }
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
